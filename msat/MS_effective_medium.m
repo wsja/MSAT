@@ -83,6 +83,19 @@
 %          Ceff : Elastic constants (GPa) (symmetry in X3 direction)
 %          rh : aggregate density (kg/m3)
 %
+%Kumar, 2013 ('kumar') stack of thin anisotropic layers
+%~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+%
+%     [Ceff,rh]=MS_effective_medium('kumar',thickness,c,rh) or
+%        Input parameters:
+%             thickness : layer thicknesses (vector)
+%                     C : elasticity of the layers (GPa) (6x6xn tensor)
+%                    rh : density of the layers (kg/m3) (vector)
+%
+%       Output parameters:
+%          Ceff : Elastic constants (GPa) (skewed axis in X1 direction)
+%          rh : aggregate density (kg/m3)
+%
 %References
 %~~~~~~~~~~
 %
@@ -101,6 +114,10 @@
 %
 %  Backus, G. E., Long-Wave Elastic Anisotropy Produced by Horizontal Layering.  
 %       J. Geophys. Res., pp 4427-4440
+%
+%  Kumar, D. Applying Backus averaging for deriving seismic anisotropy of a
+%       long-wavelength equivalent medium from well-log data.
+%       Journal of Geophysics and Engineering, 10(5), 055001.
 %
 % See also: MS_elasticDB
 
@@ -216,7 +233,7 @@ switch lower(theory)
          h = varargin{1} ; C = varargin{2} ; rh = varargin{3} ; 
          
 %     ** check the matrices
-         [dum dum nC] = size(C) ; 
+         [dum dum nC] = size(C)  ;
          
          if length(rh)~=nC
             error('MS:EFFECTIVE_MEDIUM:BaVectorLengths', ...
@@ -253,6 +270,23 @@ switch lower(theory)
 
       
       [Ceff,rh]=MS_backus_average(h,vp,vs,rh) ;
+
+
+   case {'kumar'}
+      if length(varargin)~=3
+         error('MS:EFFECTIVE_MEDIUM:BaWrongArgs', ...
+         'Kumar (2013) layering requires 3 input parameters.') ;
+      end
+
+      h = varargin{1} ; c = varargin{2} ; rh = varargin{3} ; 
+
+%  ** reshape so all vectors are the same orientation      
+      nl = length(h) ;
+      h =  reshape(h,nl,1) ;
+      rh = reshape(rh,nl,1) ;
+
+      [Ceff,rh] = MS_kumar(h,c,rh);
+
 %-------------------------------------------------------------------------------
    otherwise
       error('MS:EFFECTIVE_MEDIUM:UnknownTheory', ...
@@ -322,6 +356,96 @@ end
 %  convert to GPa
    Ceff = Ceff ./ 1e9 ;
    
+end
+
+
+     function [Ceff,rheff] = MS_kumar(h,c,rh)
+%-----------------------------------------------------------------------
+%     Subroutine to perform Backus Averaging of a stack of horizontal
+%     monocline layers to form a long wavelength equivalent medium.
+%     The skew monoclin axis is assumed to be subparallel to X3.
+%
+%     Inputs:
+%     
+%     h(1..n)        : Individual thicknesses (not depths!) of the n layers
+%     c(1..n,6,6)    : Elastic tensor of the n layers
+%     rh(1..n)       : Densities of the n layers (kg/m^3)
+%
+%     Outputs:
+%
+%     Ceff(6,6)      : Effective elasticity of the package. 
+%     rheff          : Density of the package.
+%
+%     See:
+%
+%     Kumar, D. (2013). Applying Backus averaging for deriving seismic
+%     anisotropy of a long-wavelength equivalent medium from well-log data.
+%     Journal of Geophysics and Engineering, 10(5), 055001.
+%-----------------------------------------------------------------------
+
+   h = h./sum(h);  % normalize
+   
+   c11 = squeeze(c(1,1,:));
+   c22 = squeeze(c(2,2,:));
+   c33 = squeeze(c(3,3,:));
+   c44 = squeeze(c(4,4,:));
+   c55 = squeeze(c(5,5,:));
+   c66 = squeeze(c(6,6,:));
+
+   c12 = squeeze(c(1,2,:));
+   c13 = squeeze(c(1,3,:));
+   c15 = squeeze(c(1,5,:));
+   c23 = squeeze(c(2,3,:));
+   c25 = squeeze(c(2,5,:));
+   c35 = squeeze(c(3,5,:));
+   c46 = squeeze(c(4,6,:));
+
+   A = c33.*c55 - c35.^2;
+   AA = (sum(h.*c33./A).*sum(h.*c55./A) - sum(h.*c35./A).^2).^(-1);
+   B1 = (c13.*c55 - c15.*c35)./A;
+   B2 = (c15.*c33 - c13.*c35)./A;
+   B3 = (c23.*c55 - c25.*c35)./A;
+   B4 = (c25.*c33 - c23.*c35)./A;
+
+   B5 = AA.*(sum(h.*c33./A).*sum(h.*B1).^2 + ...
+             2.*sum(h.*c35./A).*sum(h.*B1).*sum(h.*B2) + ...
+             sum(h.*c55./A).*sum(h.*B2).^2);
+
+   B6 = AA.*(sum(h.*c33./A).*sum(h.*B1).*sum(h.*B3) + ...
+             sum(h.*c35./A).*sum(h.*B1).*sum(h.*B4) + ...
+             sum(h.*c35./A).*sum(h.*B2).*sum(h.*B3) + sum(h.*c55./A).*sum(h.*B2).*sum(h.*B4));
+
+   B7 = AA.*(sum(h.*c33./A).*sum(h.*B3).^2 + ...
+             2.*sum(h.*c35./A).*sum(h.*B3).*sum(h.*B4) + ...
+             sum(h.*c55./A).*sum(h.*B4).^2);
+
+   ce33 = AA.*sum(h.*c33./A);
+   ce44 = sum(h.*1./c44).^(-1);
+   ce55 = AA.*sum(h.*c55./A);
+   ce35 = AA.*sum(h.*c35./A);
+   ce13 = AA.*sum(h.*c33./A).*sum(h.*B1) + AA.*sum(h.*c35./A).*sum(h.*B2);
+   ce23 = AA.*sum(h.*c33./A).*sum(h.*B3) + AA.*sum(h.*c35./A).*sum(h.*B4);
+   ce15 = AA.*sum(h.*c35./A).*sum(h.*B1) + AA.*sum(h.*c55./A).*sum(h.*B2);
+   ce25 = AA.*sum(h.*c35./A).*sum(h.*B3) + AA.*sum(h.*c55./A).*sum(h.*B4);
+   ce46 = sum(h.*1./c44).^(-1) .* sum(h.*c46./c44);
+   ce66 = (sum(h.*c66) - sum(h.*c46.^2./c44) + ...
+           sum(h.*1./c44)^(-1) .* sum(h.*c46./c44)^2);
+   ce11 = sum(h.*c11) - sum(h.*c13.*B1 + c15.*B2) + B5;
+   ce22 = sum(h.*c22) - sum(h.*c23.*B3 + c25.*B4) + B7;
+   ce12 = sum(h.*c12) - sum(h.*c13.*B3 + c15.*B4) + B6;
+
+   rheff = sum(h.*rh);
+
+%
+%  Form the effective matrix.   
+%   
+   Ceff = [ce11 ce12 ce13 0    ce15 0    ; ...
+           ce12 ce22 ce23 0    ce25 0    ; ...
+           ce13 ce23 ce33 0    ce35 0    ; ...
+           0    0    0    ce44 0    ce46 ; ...
+           ce15 ce25 ce35 0    ce55 0    ; ...
+           0    0    0    ce46 0    ce66 ];
+
 end
 
 
